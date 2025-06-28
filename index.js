@@ -154,9 +154,7 @@ async function main(accessToken, refreshToken) {
               broadcasterId: userId,
               senderId: botUserId,
               message: `Hello @${user}!`,
-              replyToId: msg.id,
             });
-            console.log(`Pinned message in ${channel}: Hello @${user}!`);
           } catch (pinError) {
             console.error('Error pinning message:', pinError.message, pinError);
           }
