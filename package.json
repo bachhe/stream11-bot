@@ -17,13 +17,17 @@
   "homepage": "https://github.com/bachhe/stream11-bot#readme",
   "description": "",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@twurple/api": "^7.3.0",
     "@twurple/auth": "^7.3.0",
     "@twurple/chat": "^7.3.0",
     "axios": "^1.10.0",
     "dotenv": "^17.0.0",
+    "jsonschema": "^1.5.0",
     "mongodb": "^6.17.0",
+    "multer": "^2.0.1",
     "pg": "^8.16.3",
+    "psql": "^0.0.1",
     "puppeteer": "^24.11.1"
   },
   "type": "module"

@@ -5,13 +5,16 @@ import { ChatClient } from '@twurple/chat';
 import axios from 'axios';
 import { Pool } from 'pg';
 import puppeteer from 'puppeteer';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import multer from 'multer';
+import pkg from 'jsonschema';
+const { Validator } = pkg;
 
 const clientID = process.env.CLIENT_ID;
 const clientSecret = process.env.CLIENT_SECRET;
 const databaseUrl = process.env.DATABASE_URL;
-const botAccessToken = process.env.BOT_ACCESS_TOKEN; // stream11bot access token
-const botRefreshToken = process.env.BOT_REFRESH_TOKEN; // stream11bot refresh token
-const streamerChannel = process.env.STREAMER_CHANNEL || 'notashleel'; // Default to notashleel
+const botAccessToken = process.env.BOT_ACCESS_TOKEN;
+const botRefreshToken = process.env.BOT_REFRESH_TOKEN;
 
 const pool = new Pool({ connectionString: databaseUrl });
 
@@ -79,13 +82,8 @@ async function main(accessToken, refreshToken) {
       },
     });
 
-    const requiredScopes = ['chat:read', 'chat:edit'];
-    const tokenScopes = validateResponse.data.scopes || [];
-    if (!requiredScopes.every((scope) => tokenScopes.includes(scope))) {
-      throw new Error(
-        `Streamer token missing required scopes. Required: ${requiredScopes.join(', ')}. Found: ${tokenScopes.join(', ')}`,
-      );
-    }
+    console.log('Streamer access token validated successfully:', validateResponse.data);
+    const streamerChannel = validateResponse.data.login;
 
     // Validate the stream11bot access token
     if (!botAccessToken) {
@@ -110,7 +108,7 @@ async function main(accessToken, refreshToken) {
 
     const botUserId = botValidateResponse.data.user_id; // stream11bot user ID
     const botUser = await botApiClient.users.getUserById(botUserId);
-    if (!user) {
+    if (!botUser) {
       throw new Error('Failed to fetch bot user data');
     }
 
@@ -160,15 +158,14 @@ async function main(accessToken, refreshToken) {
           lastMessageTime = now;
           console.log(`Message sent successfully to ${channel}`);
 
-          // Pin the message
           try {
             await botApiClient.chat.sendChatMessage({
               broadcasterId: userId,
               senderId: botUserId,
               message: `Hello @${user}!`,
             });
-          } catch (pinError) {
-            console.error('Error pinning message:', pinError.message, pinError);
+          } catch (sendError) {
+            console.error('Error sending message:', sendError.message, sendError);
           }
         } catch (error) {
           console.error('Error in chatClient.say:', error.message, error);
@@ -182,21 +179,23 @@ async function main(accessToken, refreshToken) {
     });
 
     setInterval(async () => {
-      let isPollActive = false;
+      let ispollactive = false;
       try {
-        client.query('SELECT isPollActive FROM channel WHERE channelid = $1', [apiClient.getUserByName(streamerChannel).id])
+        const client = await pool.connect();
+        const result = await client.query('SELECT ispollactive FROM channel WHERE channelid = $1', [(await apiClient.users.getUserByName(streamerChannel)).id]);
+        console.log(result.rows)
         if (result.rows.length > 0) {
-          isPollActive = result.rows[0].isPollActive;
+          ispollactive = result.rows[0].ispollactive;
         }
         else {
-          isPollActive = false;
-          client.query('INSERT INTO channel (channelid, isPollActive) VALUES ($1, $2)', [apiClient.getUserByName(streamerChannel).id, isPollActive]);
+          console.log(await apiClient.users.getUserByName(streamerChannel))
+          await client.query('INSERT INTO channel (channelid, ispollactive) VALUES ($1, $2)', [(await apiClient.users.getUserByName(streamerChannel)).id, ispollactive]);
         }
 
       } catch (error) {
         console.error('Error checking poll status:', error.message);
       }
-      if (!isPollActive) {
+      if (!ispollactive) {
       let page;
       try {
         let browser = await puppeteer.launch({
@@ -219,12 +218,66 @@ async function main(accessToken, refreshToken) {
         const videoPlayer = await page.$('.video-player, .persistent-player');
         if (videoPlayer) {
           const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-          await videoPlayer.screenshot({
-            path: `screenshots/stream11bot_${timestamp}.png`,
+          const screenshotBuffer = await videoPlayer.screenshot({
             type: 'png',
+            encoding: 'base64',
             fullPage: false,
           });
-          console.log(`Screenshot saved: screenshots/stream11bot_${timestamp}.png`);
+          const imageBase64 = screenshotBuffer.toString('base64');
+          const mimeType = 'image/png';
+          console.log(`Screenshot captured as base64 (length: ${imageBase64.length})`);
+          const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+          const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+          const upload = multer({ storage: multer.memoryStorage() });
+          const responseSchema = {
+            type: 'object',
+            properties: {
+              game: { type: 'string', enum: ['valorant', 'chess'] },
+              isInMatch: { type: 'boolean' }
+            },
+            required: ['game', 'isInMatch'],
+            additionalProperties: false
+          };
+
+          const validateResponse = (data) => {
+            const validator = new Validator();
+            const result = validator.validate(data, responseSchema);
+            if (!result.valid) {
+              throw new Error(`Invalid response format: ${result.errors.join(', ')}`);
+            }
+            return data;
+          };
+
+          const prompt = `
+            Analyze the provided image to determine if it shows a game of Valorant or Chess (on Chess.com).
+            For Valorant:
+              - Return isInMatch: true if the image shows an active match (e.g., in-game UI with health bars, minimap, or kill feed visible).
+              - Return isInMatch: false if the image shows the lobby, agent selection screen, or main menu.
+            For Chess (on Chess.com):
+              - Return isInMatch: true if the image shows an active match with both player timers visible and no checkmate indication.
+              - Return isInMatch: false if the image shows the Chess.com homepage, analysis board, or a completed game (e.g., checkmate or draw).
+            Return the result in the following JSON format:
+            {
+              "game": "valorant" | "chess",
+              "isInMatch": boolean
+            }
+          `;
+
+          const result = await model.generateContent([
+            prompt,
+            {
+              inlineData: {
+                data: imageBase64,
+                mimeType: mimeType
+              }
+            }
+          ], {
+            responseMimeType: 'application/json',
+            responseSchema: responseSchema
+          });
+
+          const responseData = JSON.parse(result.response.text().replace('```json', '').replace('```', ''));
+          console.log('Response from Gemini AI:', responseData);
         } else {
           console.error('Video player element not found');
         }
@@ -240,7 +293,6 @@ async function main(accessToken, refreshToken) {
         }
       }
     } else {
-      
 
     }
     }, 10000);
@@ -270,10 +322,13 @@ async function main(accessToken, refreshToken) {
       await chatClient.quit();
       console.log('ChatClient disconnected.');
     }
+    if (client) {
+      client.release();
+    }
   }
 }
 
 // Run with the streamer's access token
-main('1t7ayfa6cnmm2do1wcbdyiaiqkjogw', '2qzmpii24nl92xpmm46f25lhghrl7kti53rwbhp2gtfugj4z1e')
+main('67sk1e2k576091azcqppeiemjc8djp', 'aififkkyj8vvkdjrs99qfeifh6sedq3to0b5g022le7eoyvr4a')
 
-// runByCode('')
+// runByCode('9y0d4xs6tof7qhbuhrtm6vro2vkvu0')
