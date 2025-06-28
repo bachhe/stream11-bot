@@ -131,7 +131,6 @@ async function main(accessToken, refreshToken) {
     // Rate limit handling
     let lastMessageTime = 0;
     const messageCooldown = 1500; // 1.5 seconds between messages
-    let broadcastCounter = 0;
 
     // Debug: Log all incoming messages
     chatClient.onMessage(async (channel, user, text, msg) => {
@@ -205,16 +204,6 @@ async function main(accessToken, refreshToken) {
           console.error('Video player element not found');
         }
 
-        // Send broadcast message to keep connection alive
-        broadcastCounter++;
-        try {
-          await chatClient.say(
-            streamerChannel,
-            `This message is broadcasted every 30 seconds to keep the connection alive. This is message #${broadcastCounter}`
-          );
-        } catch (error) {
-          console.error('Error sending broadcast message:', error.message);
-        }
       } catch (error) {
         console.error('Error in Puppeteer screenshot:', error.message);
       } finally {
