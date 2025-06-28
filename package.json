@@ -22,7 +22,8 @@
     "@twurple/chat": "^7.3.0",
     "axios": "^1.10.0",
     "dotenv": "^17.0.0",
-    "mongodb": "^6.17.0"
+    "mongodb": "^6.17.0",
+    "puppeteer": "^24.11.1"
   },
   "type": "module"
 }
