@@ -6,7 +6,6 @@ import axios from 'axios';
 import mongodb from 'mongodb';
 import puppeteer from 'puppeteer';
 
-
 const clientID = process.env.CLIENT_ID;
 const clientSecret = process.env.CLIENT_SECRET;
 const mongoURI = process.env.MONGO_URI;
@@ -15,37 +14,6 @@ const botRefreshToken = process.env.BOT_REFRESH_TOKEN; // stream11bot refresh to
 const streamerChannel = process.env.STREAMER_CHANNEL || 'notashleel'; // Default to notashleel
 
 const client = new mongodb.MongoClient(mongoURI);
-
-async function refreshToken(refreshToken, tokenType = 'streamer') {
-  try {
-    const response = await axios.post('https://id.twitch.tv/oauth2/token', null, {
-      params: {
-        client_id: clientID,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token',
-      },
-    });
-    const { access_token, refresh_token } = response.data;
-    console.log(`New ${tokenType} Access Token:`, access_token);
-    console.log(`New ${tokenType} Refresh Token:`, refresh_token);
-
-    // Store new tokens in MongoDB
-    await client.connect();
-    const db = client.db('twitch');
-    await db.collection('tokens').updateOne(
-      { clientId: clientID, type: tokenType },
-      { $set: { accessToken: access_token, refreshToken: refresh_token, updatedAt: new Date() } },
-      { upsert: true }
-    );
-    return { access_token, refresh_token };
-  } catch (error) {
-    console.error(`Error refreshing ${tokenType} token:`, error.response?.data || error.message);
-    throw error;
-  } finally {
-    return;
-  }
-}
 
 async function runByCode(code, tokenType = 'streamer') {
   try {
@@ -82,12 +50,12 @@ async function runByCode(code, tokenType = 'streamer') {
     console.error('Error exchanging code for tokens:', error.response?.data || error.message);
     throw error;
   } finally {
-    return;
   }
 }
 
 async function main(accessToken, refreshToken) {
   let chatClient;
+  let browser;
   try {
     await client.connect();
     console.log('Connected to MongoDB');
@@ -99,7 +67,7 @@ async function main(accessToken, refreshToken) {
       },
     });
 
-    const requiredScopes = ['chat:read', 'chat:edit', 'channel:manage:moderators'];
+    const requiredScopes = ['chat:read', 'chat:edit'];
     const tokenScopes = validateResponse.data.scopes || [];
     if (!requiredScopes.every((scope) => tokenScopes.includes(scope))) {
       throw new Error(
@@ -116,13 +84,6 @@ async function main(accessToken, refreshToken) {
         Authorization: `OAuth ${botAccessToken}`,
       },
     });
-
-    const botRequiredScopes = ['chat:read', 'chat:edit', 'moderator:manage:chat_messages'];
-    if (!botRequiredScopes.every((scope) => botValidateResponse.data.scopes.includes(scope))) {
-      throw new Error(
-        `Bot token missing required scopes. Required: ${botRequiredScopes.join(', ')}. Found: ${botValidateResponse.data.scopes.join(', ')}`,
-      );
-    }
 
     const authProvider = new StaticAuthProvider(clientID, accessToken);
     const botAuthProvider = new StaticAuthProvider(clientID, botAccessToken);
@@ -167,15 +128,12 @@ async function main(accessToken, refreshToken) {
     await chatClient.connect();
     console.log(`ChatClient connected to channel: ${streamerChannel}`);
 
-    setInterval(() => {
-
-    }, 10000)
-
     // Rate limit handling
     let lastMessageTime = 0;
     const messageCooldown = 1500; // 1.5 seconds between messages
+    let broadcastCounter = 0;
 
-    // Handle incoming messages
+    // Debug: Log all incoming messages
     chatClient.onMessage(async (channel, user, text, msg) => {
       console.log(`Received message in ${channel} from ${user}: ${text}`);
 
@@ -214,6 +172,62 @@ async function main(accessToken, refreshToken) {
       }
     });
 
+        setInterval(async () => {
+      let page;
+      try {
+        let browser = await puppeteer.launch({
+          headless: true,
+          ignoreHTTPSErrors: true,
+        });
+        page = await browser.newPage();
+        await page.setViewport({ width: 1280, height: 720 }); 
+        await page.goto(`https://www.twitch.tv/${streamerChannel}`, { waitUntil: 'networkidle2' });
+
+        // Hide the chat column
+        await page.evaluate(() => {
+          const chat = document.querySelector('.right-column, .chat-room');
+          if (chat) chat.style.display = 'none';
+        });
+
+        // Wait for the video player to load
+        await page.waitForSelector('.video-player, .persistent-player', { timeout: 10000 });
+
+        const videoPlayer = await page.$('.video-player, .persistent-player');
+        if (videoPlayer) {
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+          await videoPlayer.screenshot({
+            path: `screenshots/stream11bot_${timestamp}.png`,
+            type: 'png',
+            fullPage: false,
+          });
+          console.log(`Screenshot saved: screenshots/stream11bot_${timestamp}.png`);
+        } else {
+          console.error('Video player element not found');
+        }
+
+        // Send broadcast message to keep connection alive
+        broadcastCounter++;
+        try {
+          await chatClient.say(
+            streamerChannel,
+            `This message is broadcasted every 30 seconds to keep the connection alive. This is message #${broadcastCounter}`
+          );
+        } catch (error) {
+          console.error('Error sending broadcast message:', error.message);
+        }
+      } catch (error) {
+        console.error('Error in Puppeteer screenshot:', error.message);
+      } finally {
+        if (page) {
+          await page.close();
+        }
+        if (browser) {
+          await browser.close();
+        }
+      }
+    }, 10000);
+
+    // Debug: Log connection and authentication events
     chatClient.onAuthenticationSuccess(() => {
       console.log('ChatClient authentication successful');
     });
@@ -233,27 +247,15 @@ async function main(accessToken, refreshToken) {
     console.log(`Bot logged in as ${botValidateResponse.data.login} (${botValidateResponse.data.user_id}), joined channel: ${streamerChannel}`);
   } catch (error) {
     console.error('Error in main:', error.message, error.response?.data);
-    // Attempt to refresh the streamer token if 401 Unauthorized
-    if (error.response?.status === 401) {
-      console.log('Attempting to refresh streamer token...');
-      try {
-        const { access_token, refresh_token } = await refreshToken(refreshToken, 'streamer');
-        await main(access_token, refresh_token);
-      } catch (refreshError) {
-        console.error('Failed to refresh streamer token:', refreshError.message);
-      }
-    }
   } finally {
     if (chatClient?.isConnected) {
       await chatClient.quit();
       console.log('ChatClient disconnected.');
     }
-    if (client.isConnected()) {
-      await client.close();
-      console.log('MongoDB connection closed.');
-    }
   }
 }
 
+// Run with the streamer's access token
+main('1t7ayfa6cnmm2do1wcbdyiaiqkjogw', '2qzmpii24nl92xpmm46f25lhghrl7kti53rwbhp2gtfugj4z1e')
 
-// runByCode('', 'streamer').catch(console.error);
+// runByCode('')
