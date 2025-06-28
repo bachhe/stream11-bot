@@ -3,19 +3,20 @@ import { StaticAuthProvider } from '@twurple/auth';
 import { ApiClient } from '@twurple/api';
 import { ChatClient } from '@twurple/chat';
 import axios from 'axios';
-import mongodb from 'mongodb';
+import { Pool } from 'pg';
 import puppeteer from 'puppeteer';
 
 const clientID = process.env.CLIENT_ID;
 const clientSecret = process.env.CLIENT_SECRET;
-const mongoURI = process.env.MONGO_URI;
+const databaseUrl = process.env.DATABASE_URL;
 const botAccessToken = process.env.BOT_ACCESS_TOKEN; // stream11bot access token
 const botRefreshToken = process.env.BOT_REFRESH_TOKEN; // stream11bot refresh token
 const streamerChannel = process.env.STREAMER_CHANNEL || 'notashleel'; // Default to notashleel
 
-const client = new mongodb.MongoClient(mongoURI);
+const pool = new Pool({ connectionString: databaseUrl });
 
 async function runByCode(code, tokenType = 'streamer') {
+  let client;
   try {
     // Exchange the authorization code for access and refresh tokens
     const tokenResponse = await axios.post('https://id.twitch.tv/oauth2/token', null, {
@@ -32,14 +33,22 @@ async function runByCode(code, tokenType = 'streamer') {
     console.log('Access Token:', access_token);
     console.log('Refresh Token:', refresh_token);
 
-    // Store tokens in MongoDB
-    await client.connect();
-    const db = client.db('twitch');
-    await db.collection('tokens').updateOne(
-      { clientId: clientID, type: tokenType },
-      { $set: { accessToken: access_token, refreshToken: refresh_token, updatedAt: new Date() } },
-      { upsert: true }
-    );
+    // Validate the access token to get the user ID
+    const validateResponse = await axios.get('https://id.twitch.tv/oauth2/validate', {
+      headers: {
+        Authorization: `OAuth ${access_token}`,
+      },
+    });
+    const userId = validateResponse.data.user_id;
+
+    // Store tokens in PostgreSQL
+    client = await pool.connect();
+    await client.query(`
+      INSERT INTO accessTokens (userid, accesstoken, refreshtoken)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (userid)
+      DO UPDATE SET accesstoken = EXCLUDED.accesstoken, refreshtoken = EXCLUDED.refreshtoken
+    `, [userId, access_token, refresh_token]);
 
     // Call main with the new tokens if for streamer
     if (tokenType === 'streamer') {
@@ -50,16 +59,19 @@ async function runByCode(code, tokenType = 'streamer') {
     console.error('Error exchanging code for tokens:', error.response?.data || error.message);
     throw error;
   } finally {
+    if (client) {
+      client.release();
+    }
   }
 }
 
 async function main(accessToken, refreshToken) {
   let chatClient;
   let browser;
+  let pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  let client;
+  client = await pool.connect();
   try {
-    await client.connect();
-    console.log('Connected to MongoDB');
-
     // Validate the streamer's access token
     const validateResponse = await axios.get('https://id.twitch.tv/oauth2/validate', {
       headers: {
@@ -98,7 +110,7 @@ async function main(accessToken, refreshToken) {
 
     const botUserId = botValidateResponse.data.user_id; // stream11bot user ID
     const botUser = await botApiClient.users.getUserById(botUserId);
-    if (!botUser) {
+    if (!user) {
       throw new Error('Failed to fetch bot user data');
     }
 
@@ -169,7 +181,22 @@ async function main(accessToken, refreshToken) {
       }
     });
 
-        setInterval(async () => {
+    setInterval(async () => {
+      let isPollActive = false;
+      try {
+        client.query('SELECT isPollActive FROM channel WHERE channelid = $1', [apiClient.getUserByName(streamerChannel).id])
+        if (result.rows.length > 0) {
+          isPollActive = result.rows[0].isPollActive;
+        }
+        else {
+          isPollActive = false;
+          client.query('INSERT INTO channel (channelid, isPollActive) VALUES ($1, $2)', [apiClient.getUserByName(streamerChannel).id, isPollActive]);
+        }
+
+      } catch (error) {
+        console.error('Error checking poll status:', error.message);
+      }
+      if (!isPollActive) {
       let page;
       try {
         let browser = await puppeteer.launch({
@@ -212,6 +239,10 @@ async function main(accessToken, refreshToken) {
           await browser.close();
         }
       }
+    } else {
+      
+
+    }
     }, 10000);
 
     // Debug: Log connection and authentication events
