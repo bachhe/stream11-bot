@@ -1,0 +1,28 @@
+{
+  "name": "stream11-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bachhe/stream11-bot.git"
+  },
+  "author": "Team Bachhe",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/bachhe/stream11-bot/issues"
+  },
+  "homepage": "https://github.com/bachhe/stream11-bot#readme",
+  "description": "",
+  "dependencies": {
+    "@twurple/api": "^7.3.0",
+    "@twurple/auth": "^7.3.0",
+    "@twurple/chat": "^7.3.0",
+    "axios": "^1.10.0",
+    "dotenv": "^17.0.0",
+    "mongodb": "^6.17.0"
+  },
+  "type": "module"
+}
