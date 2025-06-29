@@ -8,13 +8,15 @@ import puppeteer from 'puppeteer';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import multer from 'multer';
 import pkg from 'jsonschema';
-const { Validator } = pkg;
 
 const clientID = process.env.CLIENT_ID;
 const clientSecret = process.env.CLIENT_SECRET;
 const databaseUrl = process.env.DATABASE_URL;
 const botAccessToken = process.env.BOT_ACCESS_TOKEN;
 const botRefreshToken = process.env.BOT_REFRESH_TOKEN;
+const valorantUsername = process.env.VALORANT_USERNAME;
+const chessUsername = process.env.CHESS_USERNAME;
+const valorantKey = process.env.VALORANT_KEY;
 
 const pool = new Pool({ connectionString: databaseUrl });
 
@@ -179,10 +181,15 @@ async function main(accessToken, refreshToken) {
     });
 
     setInterval(async () => {
+      const stream = await apiClient.streams.getStreamByUserName(streamerChannel);
+      if (!stream) {
+        console.log(`No active stream found for ${streamerChannel}`);
+        return;
+      }
       let ispollactive = false;
       try {
         const client = await pool.connect();
-        const result = await client.query('SELECT ispollactive FROM channel WHERE channelid = $1', [(await apiClient.users.getUserByName(streamerChannel)).id]);
+        let result = await client.query('SELECT ispollactive FROM channel WHERE channelid = $1', [(await apiClient.users.getUserByName(streamerChannel)).id]);
         console.log(result.rows)
         if (result.rows.length > 0) {
           ispollactive = result.rows[0].ispollactive;
@@ -239,15 +246,6 @@ async function main(accessToken, refreshToken) {
             additionalProperties: false
           };
 
-          const validateResponse = (data) => {
-            const validator = new Validator();
-            const result = validator.validate(data, responseSchema);
-            if (!result.valid) {
-              throw new Error(`Invalid response format: ${result.errors.join(', ')}`);
-            }
-            return data;
-          };
-
           const prompt = `
             Analyze the provided image to determine if it shows a game of Valorant or Chess (on Chess.com).
             For Valorant:
@@ -263,7 +261,7 @@ async function main(accessToken, refreshToken) {
             }
           `;
 
-          const result = await model.generateContent([
+          let result = await model.generateContent([
             prompt,
             {
               inlineData: {
@@ -278,6 +276,33 @@ async function main(accessToken, refreshToken) {
 
           const responseData = JSON.parse(result.response.text().replace('```json', '').replace('```', ''));
           console.log('Response from Gemini AI:', responseData);
+          if (!responseData.isInMatch){
+            console.log('No active match detected');
+            return;
+          }
+
+          if (responseData.game === 'valorant') {
+            console.log('Valorant match detected');
+            await chatClient.say(streamerChannel, `Valorant match is active!`);
+            // Logic to start a poll for Valorant
+            await client.query('UPDATE channel SET lastpollgame = $1, ispollactive = $2 WHERE channelid = $3', ['valorant', true, (await apiClient.users.getUserByName(streamerChannel)).id]);
+            //splitting of valorant username and tag
+            const [username, tag] = valorantUsername.split('#');
+
+            let lifetimeHistoryApi = `https://api.henrikdev.xyz/valorant/v1/lifetime/matches/ap/${username}/${tag}`;
+
+            const lifetimeHistoryResponse = await axios.get(lifetimeHistoryApi, {
+              headers: {
+                'Authorization': `${valorantKey}`
+              }
+            });
+            console.log('Lifetime history response:', lifetimeHistoryResponse.data);
+          }
+          else if (responseData.game === 'chess') {
+            console.log('Chess match detected');
+            await chatClient.say(streamerChannel, `Chess match is active!`);
+            //logic to start a poll
+          }
         } else {
           console.error('Video player element not found');
         }
@@ -293,6 +318,35 @@ async function main(accessToken, refreshToken) {
         }
       }
     } else {
+      const client = await pool.connect();
+      result = await client.query('SELECT lastpollgame FROM channel WHERE channelid = $1', [(await apiClient.users.getUserByName(streamerChannel)).id]);
+      if (result.rows.length > 0) {
+        const lastPollGame = result.rows[0].lastpollgame;
+        if (lastPollGame) {
+          console.log(`Last poll game was: ${lastPollGame}`);
+          
+          let lastAPICall = {};
+          result = await client.query('SELECT lastapicall FROM channel WHERE channelid = $1', [(await apiClient.users.getUserByName(streamerChannel)).id]);
+          if (result.rows.length > 0) {
+            lastAPICall = JSON.parse(result.rows[0].lastapicall);
+          }
+
+          if (lastPollGame === 'valorant') {
+            console.log('Valorant poll is still active');
+
+            //checking for update in valorant api
+          }
+
+          if (lastPollGame === 'chess') {
+            console.log('Chess poll is still active');
+            //checking for update in chess api
+          }
+
+        } else {
+          console.log('No last poll game found');
+          await client.query('UPDATE channel SET lastpollgame = $1, ispollactive = $2 WHERE channelid = $3', ['none', false, (await apiClient.users.getUserByName(streamerChannel)).id]);
+        }
+      }
 
     }
     }, 10000);
@@ -329,6 +383,6 @@ async function main(accessToken, refreshToken) {
 }
 
 // Run with the streamer's access token
-main('67sk1e2k576091azcqppeiemjc8djp', 'aififkkyj8vvkdjrs99qfeifh6sedq3to0b5g022le7eoyvr4a')
+main('o52pw4p93kf2zoh1edbrhxvcp872ov', 'sha74aiwevdzic8blrxa56vyxu0c09pgw63jad7rgrosopqdts')
 
-// runByCode('9y0d4xs6tof7qhbuhrtm6vro2vkvu0')
+// runByCode('j3ya6152qhhur7v62ow6o2jlotz10i')
