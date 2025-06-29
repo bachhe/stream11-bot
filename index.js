@@ -30,7 +30,7 @@ async function runByCode(code, tokenType = 'streamer') {
         client_secret: clientSecret,
         code: code,
         grant_type: 'authorization_code',
-        redirect_uri: 'https://stream11.vercel.app/twitchbot/redirect',
+        redirect_uri: 'https://stream11.vercel.app/api/auth/twitch/callback',
       },
     });
 
@@ -294,13 +294,73 @@ async function main(accessToken, refreshToken) {
             let lifetimeHistoryApi = `https://api.henrikdev.xyz/valorant/v4/matches/ap/pc/${username}/${tag}?size=10`;
 
             const lifetimeHistoryResponse = await axios.get(lifetimeHistoryApi, {
-              headers: {
-                'Authorization': `${valorantKey}`
-              }
+                headers: {
+                    'Authorization': `${valorantKey}`
+                }
             });
-            console.log('Lifetime history response:', JSON.stringify(lifetimeHistoryResponse.data));
-          }
-          else if (responseData.game === 'chess') {
+            // console.log('Lifetime history response:', JSON.stringify(lifetimeHistoryResponse.data));
+            const matches = JSON.parse(JSON.stringify(lifetimeHistoryResponse.data.data));
+            let dataForLast10Matches = {
+                kills: 0,
+                deaths: 0,
+                headshot: 0,
+                bodyshot: 0,
+                legshot: 0,
+                ultimate: 0,
+            }
+            for (let i=0; i < matches.length; i++) {
+                const match = matches[i];
+                console.log(`Match ${i + 1}:`, match.metadata['match_id']);
+                //find the player with the given username and tag
+                const player = match.players.find(p => p.name === username && p.tag === tag);
+                if (player) {
+                    console.log(`Player found: ${player.name}#${player.tag}`);
+                    dataForLast10Matches.kills += player.stats.kills;
+                    dataForLast10Matches.deaths += player.stats.deaths;
+                    dataForLast10Matches.headshot += player.stats.headshots;
+                    dataForLast10Matches.bodyshot += player.stats.bodyshots;
+                    dataForLast10Matches.legshot += player.stats.legshots;
+                    dataForLast10Matches.ultimate += player['ability_casts'].ultimate;
+                } else {
+                    console.log(`Player ${username}#${tag} not found in match ${i + 1}`);
+                }
+
+            }
+            dataForLast10Matches.kda = parseFloat((dataForLast10Matches.kills / Math.max(dataForLast10Matches.deaths, 1)).toFixed(2));
+            dataForLast10Matches.killsPerGame = parseInt((dataForLast10Matches.kills /10).toFixed(2));
+            dataForLast10Matches.deathsPerGame = parseInt((dataForLast10Matches.deaths /10).toFixed(2));
+            dataForLast10Matches.ultimatePerGame = parseInt((dataForLast10Matches.ultimate /10).toFixed(2));
+            dataForLast10Matches.headshotPerGame = parseInt((dataForLast10Matches.headshot /10).toFixed(2));
+            dataForLast10Matches.bodyshotPerGame = parseInt((dataForLast10Matches.bodyshot /10).toFixed(2));
+            dataForLast10Matches.legshotPerGame = parseInt((dataForLast10Matches.legshot /10).toFixed(2));
+
+            let question_list = [
+              `average_kd`,
+              `win_loss`,
+              `headshot`,
+              `bodyshot`,
+              `legshot`,
+              `ultimate`
+            ]
+
+            //select a random question from the list
+            const randomQuestion = question_list[Math.floor(Math.random() * question_list.length)];
+            console.log(`Random question selected: ${randomQuestion}`);
+
+            const questionMap = {
+              average_kd: `Will @${streamerChannel} have more than ${dataForLast10Matches.kda} K/D ratio?`,
+              win_loss: `Will @${streamerChannel} win this game?`,
+              headshot: `Will @${streamerChannel} have more than ${dataForLast10Matches.headshotPerGame} headshots this game?`,
+              bodyshot: `Will @${streamerChannel} have more than ${dataForLast10Matches.bodyshotPerGame} bodyshots this game?`,
+              legshot: `Will @${streamerChannel} have more than ${dataForLast10Matches.legshotPerGame} legshots this game?`,
+              ultimate: `Will @${streamerChannel} use his ultimate more than ${dataForLast10Matches.ultimatePerGame} times this game?`
+            }
+
+            // Start a poll with the selected question
+            await chatClient.say(streamerChannel, `${questionMap[randomQuestion]} | Bet chatpoints with !yesbet <amount> or !nobet <amount>`);
+            await chatClient.say(streamerChannel, '/pin');
+
+          } else if (responseData.game === 'chess') {
             console.log('Chess match detected');
             await chatClient.say(streamerChannel, `Chess match is active!`);
             //logic to start a poll
@@ -351,7 +411,7 @@ async function main(accessToken, refreshToken) {
       }
 
     }
-    }, 10000);
+    }, 30000);
 
     // Debug: Log connection and authentication events
     chatClient.onAuthenticationSuccess(() => {
@@ -385,6 +445,6 @@ async function main(accessToken, refreshToken) {
 }
 
 // Run with the streamer's access token
-main('o52pw4p93kf2zoh1edbrhxvcp872ov', 'sha74aiwevdzic8blrxa56vyxu0c09pgw63jad7rgrosopqdts')
+main('k8xsuolh5z7btdgy59wkvkw4vxkv4m', 'ks9gngke9dzzoti1741nc9zbitqi25ui0lnaybdt3xtkji3xx5')
 
-// runByCode('j3ya6152qhhur7v62ow6o2jlotz10i')
+// runByCode('lxostsvdxfgegbept6858tmy3rmprt')
