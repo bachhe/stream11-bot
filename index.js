@@ -355,6 +355,7 @@ async function main(accessToken, refreshToken) {
               legshot: `Will @${streamerChannel} have more than ${dataForLast10Matches.legshotPerGame} legshots this game?`,
               ultimate: `Will @${streamerChannel} use his ultimate more than ${dataForLast10Matches.ultimatePerGame} times this game?`
             }
+            console.log(dataForLast10Matches);
 
             // Start a poll with the selected question
             await chatClient.say(streamerChannel, `${questionMap[randomQuestion]} | Bet chatpoints with !yesbet <amount> or !nobet <amount>`);
@@ -380,38 +381,38 @@ async function main(accessToken, refreshToken) {
         }
       }
     } else {
-      const client = await pool.connect();
-      result = await client.query('SELECT lastpollgame FROM channel WHERE channelid = $1', [(await apiClient.users.getUserByName(streamerChannel)).id]);
-      if (result.rows.length > 0) {
-        const lastPollGame = result.rows[0].lastpollgame;
-        if (lastPollGame) {
-          console.log(`Last poll game was: ${lastPollGame}`);
+      // const client = await pool.connect();
+      // let result = await client.query('SELECT lastpollgame FROM channel WHERE channelid = $1', [(await apiClient.users.getUserByName(streamerChannel)).id]);
+      // if (result.rows.length > 0) {
+      //   const lastPollGame = result.rows[0].lastpollgame;
+      //   if (lastPollGame) {
+      //     console.log(`Last poll game was: ${lastPollGame}`);
           
-          let lastAPICall = {};
-          result = await client.query('SELECT lastapicall FROM channel WHERE channelid = $1', [(await apiClient.users.getUserByName(streamerChannel)).id]);
-          if (result.rows.length > 0) {
-            lastAPICall = JSON.parse(result.rows[0].lastapicall);
-          }
+      //     let lastAPICall = {};
+      //     result = await client.query('SELECT lastapicall FROM channel WHERE channelid = $1', [(await apiClient.users.getUserByName(streamerChannel)).id]);
+      //     if (result.rows.length > 0) {
+      //       lastAPICall = JSON.parse(result.rows[0].lastapicall);
+      //     }
 
-          if (lastPollGame === 'valorant') {
-            console.log('Valorant poll is still active');
+      //     if (lastPollGame === 'valorant') {
+      //       console.log('Valorant poll is still active');
 
-            //checking for update in valorant api
-          }
+      //       //checking for update in valorant api
+      //     }
 
-          if (lastPollGame === 'chess') {
-            console.log('Chess poll is still active');
-            //checking for update in chess api
-          }
+      //     if (lastPollGame === 'chess') {
+      //       console.log('Chess poll is still active');
+      //       //checking for update in chess api
+      //     }
 
-        } else {
-          console.log('No last poll game found');
-          await client.query('UPDATE channel SET lastpollgame = $1, ispollactive = $2 WHERE channelid = $3', ['none', false, (await apiClient.users.getUserByName(streamerChannel)).id]);
-        }
+      //   } else {
+      //     console.log('No last poll game found');
+      //     await client.query('UPDATE channel SET lastpollgame = $1, ispollactive = $2 WHERE channelid = $3', ['none', false, (await apiClient.users.getUserByName(streamerChannel)).id]);
+      //   }
       }
 
     }
-    }, 30000);
+    , 30000);
 
     // Debug: Log connection and authentication events
     chatClient.onAuthenticationSuccess(() => {

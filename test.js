@@ -5,7 +5,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
 dotenv.config();
 const __dirname = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
-const screenshotPath = path.join(__dirname, 'testScreenshot5.png');
+const screenshotPath = path.join(__dirname, 'testScreenshot1.png');
 console.log(`Reading screenshot from: ${screenshotPath}`);
 const screenshotBuffer = fs.readFileSync(screenshotPath);
 
