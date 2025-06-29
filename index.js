@@ -209,26 +209,28 @@ async function main(accessToken, refreshToken) {
           headless: true,
           ignoreHTTPSErrors: true,
         });
-        page = await browser.newPage();
-        await page.setViewport({ width: 1280, height: 720 }); 
+        page = await browser.newPage(); 
         await page.goto(`https://www.twitch.tv/${streamerChannel}`, { waitUntil: 'networkidle2' });
 
-        // Hide the chat column
-        await page.evaluate(() => {
-          const chat = document.querySelector('.right-column, .chat-room');
-          if (chat) chat.style.display = 'none';
-        });
 
-        // Wait for the video player to load
-        await page.waitForSelector('.video-player, .persistent-player', { timeout: 10000 });
 
-        const videoPlayer = await page.$('.video-player, .persistent-player');
-        if (videoPlayer) {
+        await page.waitForSelector('video', { timeout: 10000 });
+
+        const videoElement = await page.$('video');
+        if (videoElement) {
+          const videoRect = await videoElement.boundingBox();
+          const { x,y,width,height } = videoRect;
+          console.log(`Video element found at x: ${x}, y: ${y}, width: ${width}, height: ${height}`);
           const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-          const screenshotBuffer = await videoPlayer.screenshot({
+          const screenshotBuffer = await videoElement.screenshot({
             type: 'png',
             encoding: 'base64',
-            fullPage: false,
+            clip: {
+              x: x,
+              y: y,
+              width: width,
+              height: height
+            }
           });
           const imageBase64 = screenshotBuffer.toString('base64');
           const mimeType = 'image/png';
@@ -285,18 +287,18 @@ async function main(accessToken, refreshToken) {
             console.log('Valorant match detected');
             await chatClient.say(streamerChannel, `Valorant match is active!`);
             // Logic to start a poll for Valorant
-            await client.query('UPDATE channel SET lastpollgame = $1, ispollactive = $2 WHERE channelid = $3', ['valorant', true, (await apiClient.users.getUserByName(streamerChannel)).id]);
+            // await client.query('UPDATE channel SET lastpollgame = $1, ispollactive = $2 WHERE channelid = $3', ['valorant', true, (await apiClient.users.getUserByName(streamerChannel)).id]);
             //splitting of valorant username and tag
             const [username, tag] = valorantUsername.split('#');
 
-            let lifetimeHistoryApi = `https://api.henrikdev.xyz/valorant/v1/lifetime/matches/ap/${username}/${tag}`;
+            let lifetimeHistoryApi = `https://api.henrikdev.xyz/valorant/v4/matches/ap/pc/${username}/${tag}?size=10`;
 
             const lifetimeHistoryResponse = await axios.get(lifetimeHistoryApi, {
               headers: {
                 'Authorization': `${valorantKey}`
               }
             });
-            console.log('Lifetime history response:', lifetimeHistoryResponse.data);
+            console.log('Lifetime history response:', JSON.stringify(lifetimeHistoryResponse.data));
           }
           else if (responseData.game === 'chess') {
             console.log('Chess match detected');
